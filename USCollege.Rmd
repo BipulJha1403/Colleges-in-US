@@ -1,0 +1,244 @@
+---
+title: "Colleges in US"
+author: "Bipul"
+date: "11/10/2020"
+output: html_document
+---
+
+First lets turn off the unnecessary warnings, so as to make the work more appealing to the eyes.
+```{r}
+knitr::opts_chunk$set(warning = FALSE)
+```
+
+## **The Data**
+
+First we load the data set and create a variable called USColleges that will store the entire Data Set.
+```{r}
+USColleges <- read.csv("College.csv")
+```
+
+Looking at the different components of the Dataset now.
+
+```{r}
+dim(USColleges)
+str(USColleges)
+```
+
+## **Finiding Key Features**
+
+Firstly, we know that the **College Name** will not contribute to the dataset in any possible way, so we create a new variable without the **College Name** or in this case, the variable **X**
+
+```{r}
+mydata <- USColleges[,2:19] # The First column is the college name. 
+dim(mydata)
+```
+
+Now we will run the **Principal ComponentAnalysis** and **Singular Vector Decomposition** in this new dataset, and try to find out the **relevant variables**.
+
+```{r}
+prcomp(mydata[,2:18])
+```
+
+```{r}
+svd1 <- svd(mydata[,2:18])
+diag_element <- svd1$d
+diag_element
+```
+
+Now we look at how much the first element accounts for to the entire variablility of the dataset. We use the **prop.table** function for that.
+```{r}
+prop.table(diag_element)*100
+```
+
+We will now plot the proportnality of the elements.
+```{r}
+library(ggplot2)
+library(ggfortify)
+plot(c(1:17), prop.table(diag_element)*100, pch = 19, col = "green", main = "Proportionality of variance", xlab = "Column Number", ylab = "Variance")
+```
+
+So, we see that almost all the variance is shown by the **first 8 columns** after which the variance is almost **zero**.
+
+We need to the take **corelations** into account as well, because, that hampers the **PCA** by a fair amount.
+
+To do this, we can either fild the **correlation** using the **cor** function or we can make a plot that will do the same job.
+
+```{r}
+cor(mydata[2:18])
+```
+
+```{r}
+library(corrplot)
+corrplot(cor(mydata[,2:18]), method = "circle")
+```
+
+The **corrplot** shows us some key aspects, as to what are the features that are related, and how it will be benifitial to eliminate them.
+
+We see that some of the features like **Apps**, **Accept**, **Enroll** are related, the variables like **F.Undergrad** and **P.Undergrad** are related, the variables **Top25perc** and **Top10perc** are related, and the variable **PhD** is related to **Terminal**, so in this kind of a scenario, it is better to neglect some of the variables, so we make a new dataset with the desirable columns.
+
+```{r}
+newdata <- mydata[, -c(3, 4, 6, 7, 13)]
+dim(newdata)
+head(newdata)
+```
+
+Now we run the **SVD** again to see the variance of the coulumns.
+
+```{r}
+svd2 <- svd(newdata[,2:13])
+plot(c(1:12), prop.table(svd2$d)*100, pch = 19, col = "red", main = "Proportionality of variance", xlab = "Column Number", ylab = "Variance")
+```
+
+We see that most of the variance in the entire dataset is shown by the first column only.We make a **corrplot** again to see how the variables are related.
+
+```{r}
+corrplot(cor(newdata[2:13]), method = "circle")
+```
+
+Here we see that there is a lot less **correlation** now. That is good for an unbiased analysis.
+
+## **Unsupervised Machine Learning**
+
+For this dataset, we will try to classify the entire dataset into multiple clusters. To find the optimal number of clusters we will use the **Wiyhin SUm of Squares** plot. First we make a new function called **wssplot** for this.
+
+### **The WSS Plot**
+
+```{r}
+wssplot <- function(data, nc = 15, seed = 1234)
+{
+        wss <- (nrow(data)-1)*sum(apply(data, 2, var))
+        for(i in 2:nc){
+                set.seed(seed)
+                wss[i] <- sum(kmeans(data, centers = i)$withinss)}
+        plot(1:nc, wss, type = "b", clab = "Number of clusters", ylab = "Within groups sum of squares", xlab = 
+                     "Clusters") 
+}
+```
+
+Now we use this **wssplot** function and see where the kink occurs in the plot.
+
+```{r}
+wssplot(newdata[,2:13])
+```
+
+From the plot we see that the **knik** occurs at the point 2, and that shows that there can be 2 optimal clusters for the cluster analysis.
+
+Now we will do the kmeans clustering with 2 centers as shown by the **wssplot** function.
+
+### **Kmeans Cluster**
+
+Now we will make the **kmaens cluster** for the dataset and see if the cluster analysis will be able to separate the 2 categories.
+
+```{r}
+km <- kmeans(newdata[,2:13], centers = 2, nstart = 10)
+km
+```
+
+Now we use the **autoplot** function provided in the **ggfortify**
+
+```{r}
+autoplot(km, newdata[,2:13], frame = TRUE)
+```
+
+The **autoplot** function and **kmeans** was able segregate the data into 2 parts.
+
+## Analysing the Cluster Analysis
+
+We have done the Kmeans clustering, and now we need to check which cluster gives the best result.
+```{r}
+table(km$cluster, newdata[,1])
+prop.table(table(km$cluster, newdata[,1]), 2)*100
+```
+
+We will plot the results of the cluster analysis and the along-side to see how well the kmeans cluster analysis work, and how the 2 plots will look alongside.
+
+```{r}
+p1 <- ggplot(mydata, aes(x = Outstate, y = S.F.Ratio, colour = Private)) + geom_point()
+p2 <- ggplot(mydata, aes(x = Outstate, y = S.F.Ratio, colour = km$cluster)) + geom_point()
+library(gridExtra)
+grid.arrange(p1, p2,ncol = 2)
+```
+
+
+We see that the Cluster Analysis was not very effective in differentiating between the **2 classes of colleges**. Now we will try out some **Supervised Machine Learning** to do the classification.
+
+## **Supervised Machine Learning**
+
+We need to make **training** and **testing** dataset and make models.
+
+First we will load the **caret** package that will be used to create the models.
+
+```{r}
+library(caret)
+```
+
+First we will create a data partition and keep the testing data completely isolated and apply the model on it just once.
+
+```{r}
+inTrain <- createDataPartition(newdata$Private, p = 0.7, list = FALSE)
+training <- newdata[inTrain, ]
+testing <- newdata[-inTrain, ]
+```
+
+We will do a bit of preprocessing and model validation will be done by **10 fold cross validation**.
+
+```{r}
+trainType <- trainControl(method = "cv", number = 10)
+```
+
+We will train a model with different models.
+
+### **Naive Bayes**
+
+We make a **Naive Bayes** model and do some **normalization** of the dataset
+
+```{r}
+model_nb <- train(Private~., data = training, trControl = trainType, preProc = c("scale", "center"), method = "nb")
+model_nb
+```
+
+### **K-nearest neighbour**
+
+We make the classification model with **k-nearest neighbour** model and take the **k value as 3**
+
+```{r}
+model_knn <- knn3(Private~., data = training, k = 3)
+model_knn
+```
+
+### **Testing the models**
+
+Now we will test the models that we have created and see how the models performed.
+
+#### **Naive Bayes model testing**
+
+```{r}
+prediction_nb <- predict(model_nb, testing[, 2:13])
+confusionMatrix(prediction_nb, testing$Private)
+```
+
+#### **kNearest Neighbour model testing**
+
+```{r}
+prediction_knn <- predict(model_knn, testing[,2:13], type = "class")
+confusionMatrix(prediction_knn, testing$Private)
+```
+
+## **Conclusion**
+
+We see that the **k-Nearest Neighbour** model performed better than the **Naive Bayes** model on the testing data, and performed a lot better than the **kmean clustering**
+
+```{r}
+result_nb <- confusionMatrix(prediction_nb, testing$Private)
+result_knn <- confusionMatrix(prediction_knn, testing$Private)
+```
+
+#### **Naive Bayes's results**
+```{r}
+result_nb$table
+```
+
+#### **k-Nearest Neighbour results**
+```{r}
+result_knn$table
+```
